@@ -1,28 +1,41 @@
+/* eslint-disable camelcase */
 /* eslint-disable no-alert */
 /* eslint-disable react-hooks/exhaustive-deps */
 import React, { useEffect, useState } from 'react';
 import * as uuid from 'uuid';
+import axios from 'axios';
 
 import io from 'socket.io-client';
 import { Container, Content, Card, MyMessage, OtherMessage } from './styles';
 
 interface Message {
   id: string;
+  sender_id: string;
   name: string;
   text: string;
 }
 
 interface Payload {
-  name: string;
   text: string;
-  receiver: string;
+  name: string;
+  sender_user_id: string;
+  receiver_id: string;
+}
+
+interface User {
+  id: string;
+  name: string;
+  token: string;
 }
 
 const Home: React.FC = () => {
   const [title] = useState('Chat');
-  const [name, setName] = useState('');
-  const [hiddenName, setHiddenName] = useState(false);
-  const [nameReceiver, setNameReceiver] = useState('');
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
+  const [user, setUser] = useState<User>({} as User);
+  const [hiddenLogin, setHiddenLogin] = useState(false);
+  const [hiddenName, setHiddenName] = useState(true);
+  const [idReceiver, setIdReceiver] = useState('');
   const [text, setText] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [socket, setSocket] = useState<SocketIOClient.Socket>();
@@ -32,6 +45,7 @@ const Home: React.FC = () => {
       const newMessage: Message = {
         id: uuid.v4(),
         name: message.name,
+        sender_id: message.sender_user_id,
         text: message.text,
       };
 
@@ -42,18 +56,19 @@ const Home: React.FC = () => {
       socket.on('msgToClient', (message: Payload) => {
         receivedMessage(message);
       });
-  }, [messages, name, text, socket]);
+  }, [messages, text, socket]);
 
   function validateInput() {
-    return name.length > 0 && text.length > 0 && nameReceiver.length > 0;
+    return text.length > 0 && idReceiver.length > 0;
   }
 
   function sendMessage() {
     if (validateInput()) {
       const message: Payload = {
-        name,
         text,
-        receiver: nameReceiver,
+        sender_user_id: user.id,
+        name: user.name,
+        receiver_id: idReceiver,
       };
 
       if (socket) {
@@ -65,13 +80,37 @@ const Home: React.FC = () => {
     }
   }
 
+  async function handleLogin() {
+    if (login && password) {
+      try {
+        const response = await axios.post('http://localhost:3003/auth/login', {
+          email: login,
+          password,
+        });
+
+        setUser({
+          id: response.data.user.id,
+          name: response.data.user.name,
+          token: response.data.access_token,
+        });
+
+        setHiddenLogin(true);
+        setHiddenName(false);
+      } catch (error) {
+        alert('erro login');
+      }
+    } else {
+      alert('Preencha os campos');
+    }
+  }
+
   function initChat() {
-    if (name.length > 0 && nameReceiver.length > 0) {
+    if (idReceiver.length > 0) {
       setSocket(
-        io('http://localhost:3333', {
+        io('http://localhost:3004', {
           auth: {
-            token: name,
-            receiver: nameReceiver,
+            token: user?.token,
+            receiver_id: idReceiver,
           },
         }),
       );
@@ -85,71 +124,84 @@ const Home: React.FC = () => {
   return (
     <Container>
       <Content>
-        {!hiddenName ? (
+        {!hiddenLogin && (
           <>
             <h1>{title}</h1>
             <input
               type="text"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="Enter name..."
+              value={login}
+              onChange={e => setLogin(e.target.value)}
+              placeholder="Login"
             />
             <input
-              type="text"
-              value={nameReceiver}
-              onChange={e => setNameReceiver(e.target.value)}
-              placeholder="Enter name receiver..."
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="password"
             />
-            <button type="button" onClick={() => initChat()}>
-              Init
+            <button type="button" onClick={() => handleLogin()}>
+              Login
             </button>
           </>
-        ) : (
-          <>
-            <h2>{name}</h2>
-            <h2>
-              To:
-              {nameReceiver}
-            </h2>
-            <Card>
-              <ul>
-                {messages.map(message => {
-                  if (message.name === name) {
+        )}
+        {hiddenLogin &&
+          (!hiddenName ? (
+            <>
+              <input
+                type="text"
+                value={idReceiver}
+                onChange={e => setIdReceiver(e.target.value)}
+                placeholder="Enter id receiver..."
+              />
+              <button type="button" onClick={() => initChat()}>
+                Init
+              </button>
+            </>
+          ) : (
+            <>
+              <h2>
+                To:
+                {idReceiver}
+              </h2>
+              <Card>
+                <ul>
+                  {messages.map(message => {
+                    if (message.sender_id === user?.id) {
+                      return (
+                        <MyMessage key={message.id}>
+                          <span>
+                            {user?.name}
+                            {' diz:'}
+                          </span>
+
+                          <p>{message.text}</p>
+                        </MyMessage>
+                      );
+                    }
+
                     return (
-                      <MyMessage key={message.id}>
+                      <OtherMessage key={message.id}>
                         <span>
                           {message.name}
                           {' diz:'}
                         </span>
 
                         <p>{message.text}</p>
-                      </MyMessage>
+                      </OtherMessage>
                     );
-                  }
-
-                  return (
-                    <OtherMessage key={message.id}>
-                      <span>
-                        {message.name}
-                        {' diz:'}
-                      </span>
-
-                      <p>{message.text}</p>
-                    </OtherMessage>
-                  );
-                })}
-              </ul>
-            </Card>
-            <input
-              value={text}
-              onChange={e => setText(e.target.value)}
-              placeholder="Enter message..."
-            />
-            <button type="button" onClick={() => sendMessage()}>
-              Send
-            </button>
-          </>
-        )}
+                  })}
+                </ul>
+              </Card>
+              <input
+                value={text}
+                onChange={e => setText(e.target.value)}
+                placeholder="Enter message..."
+              />
+              <button type="button" onClick={() => sendMessage()}>
+                Send
+              </button>
+            </>
+          ))}
       </Content>
     </Container>
   );
